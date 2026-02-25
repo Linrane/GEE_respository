@@ -1,0 +1,19 @@
+// 加载Landsat 8影像集合
+var l8 = ee.ImageCollection('LANDSAT/LC08/C02/T1_L2');
+
+// 筛选影像：时间范围、区域、云量
+var image = l8.filterDate('2023-01-01', '2023-12-31')
+              .filterBounds(ee.Geometry.Point([116.4, 39.9])) // 北京
+              .filter(ee.Filter.lt('CLOUD_COVER', 10))
+              .first();//Select the first image.
+
+// 显示影像（使用真彩色合成）
+var visParams = {
+  bands: ['SR_B4', 'SR_B3', 'SR_B2'],
+  min: 0,
+  max: 30000,
+  gamma: 1.4//More than 1 ,the image will darker.Less than 1,the image will lighter.
+};
+
+Map.centerObject(image, 8);
+Map.addLayer(image, visParams, 'Landsat 8 真彩色');
