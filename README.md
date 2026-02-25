@@ -344,7 +344,9 @@
 
 本代码为文章引用，原文章地址为：https://mp.weixin.qq.com/s/Xu0C8n7VLTDVbF_NS-zZQA
 
-代码运行：https://code.earthengine.google.com/c972be0f180ba6b2d4c8d1b120a8b4a8（注，这个运行指的是GEE的代码运行，而第十五个代码当中利用Python优化的部分在第二部分，你需要在本地运行尝试
+代码运行：https://code.earthengine.google.com/c972be0f180ba6b2d4c8d1b120a8b4a8
+
+（注，这个运行指的是GEE的代码运行，而第十五个代码当中利用Python优化的部分在第二部分，你需要在本地运行尝试
 
 整体实现思路如下：
 
@@ -398,7 +400,9 @@ Python:
 
 本代码为文章引用，原文章地址为：https://mp.weixin.qq.com/s/3Msz67-wFlXZUfnfd67KlA
 
-代码运行：https://code.earthengine.google.com/a1494d94de6417bc41d87b5c5e4b91ea（提醒：别忘了自己添加数据产品，这些代码基本上只要涉及到的都要自己往上加）
+代码运行：https://code.earthengine.google.com/a1494d94de6417bc41d87b5c5e4b91ea
+
+（提醒：别忘了自己添加数据产品，这些代码基本上只要涉及到的都要自己往上加）
 
 整体实现思路：
 
