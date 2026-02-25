@@ -1,0 +1,114 @@
+/*******************************************************
+  GHSL (100 m) — map display, per-year area (km2) chart,
+  CSV export, and per-year GeoTIFF export (to Drive)
+*******************************************************/
+
+// 1. 设置区域
+var geometry = ee.FeatureCollection("projects/ee-linrane111/assets/eeds");
+Map.addLayer(geometry, {}, "边界");
+Map.centerObject(geometry, 8);
+
+// 2. 加载 GHSL 数据 (1975-2030, 5年间隔)
+var ghsl100 = ee.ImageCollection('JRC/GHSL/P2023A/GHS_BUILT_S')
+                .select(['built_surface'])
+                .filterBounds(geometry);
+
+print('可用年份:', ghsl100.aggregate_array('system:time_start'));
+
+// 3. 可视化 - 显示最新年份
+var visParams = {
+  min: 0, 
+  max: 10000, 
+  palette: ['000000','1a1a1a','404040','707070','a0a0a0','d0d0d0','ffffff']
+};
+var latestImage = ghsl100.sort('system:time_start', false).first();
+Map.addLayer(latestImage.clip(geometry), visParams, 'GHSL_100m_Latest');
+
+// 4. 计算面积并创建特征集合
+var areaFeatures = ghsl100.map(function(img){
+  var year = ee.Date(img.get('system:time_start')).format('YYYY');
+  var area = img.reduceRegion({
+    reducer: ee.Reducer.sum(),
+    geometry: geometry,
+    scale: 100,
+    maxPixels: 1e13
+  }).get('built_surface');
+  
+  // 处理空值情况
+  area = ee.Algorithms.If(area, area, 0);
+  
+  return ee.Feature(null, {
+    'year': year,
+    'area_m2': area,
+    'area_km2': ee.Number(area).divide(1e6)
+  });
+});
+
+// 5. 绘制柱状图
+var chart = ui.Chart.feature.byFeature(areaFeatures, 'year', ['area_km2'])
+  .setChartType('ColumnChart')
+  .setOptions({
+    title: 'GHSL建成区面积变化（100m分辨率）',
+    hAxis: {title: 'Year'},
+    vAxis: {title: 'Area (km²)'},
+    legend: {position: 'none'},
+    colors: ['#225ea8']
+  });
+print(chart);
+
+// 6. 导出 CSV
+Export.table.toDrive({
+  collection: ee.FeatureCollection(areaFeatures),
+  description: 'GHSL_100m_Area_Table',
+  folder: 'earthengine',
+  fileFormat: 'CSV'
+});
+
+// 7. 按年份导出 GeoTIFF 到 Drive
+// 获取年份列表并批量导出
+var yearList = ghsl100.toList(ghsl100.size());
+
+// 导出函数：为每个年份创建导出任务
+ghsl100.evaluate(function(collection, error) {
+  if (error) {
+    print('Error loading collection:', error);
+    return;
+  }
+  
+  collection.features.forEach(function(feature) {
+    var year = new Date(feature.properties['system:time_start']).getFullYear();
+    var image = ee.Image(feature.id).select('built_surface');
+    
+    Export.image.toDrive({
+      image: image.clip(geometry),
+      description: 'GHSL_100m_' + year,
+      folder: 'earthengine/ghsl_tiles',
+      region: geometry,
+      scale: 100,
+      maxPixels: 1e13,
+      fileFormat: 'GeoTIFF',
+      formatOptions: {
+        cloudOptimized: true
+      }
+    });
+    
+    print('已创建导出任务: GHSL_100m_' + year);
+  });
+});
+
+// 备用方案：手动指定年份导出（如果自动循环有问题）
+// 取消注释以下代码并修改年份以导出特定年份
+/*
+var targetYear = 2020;
+var yearImage = ghsl100.filter(ee.Filter.calendarRange(targetYear, targetYear, 'year')).first();
+
+Export.image.toDrive({
+  image: yearImage.clip(roi),
+  description: 'GHSL_100m_' + targetYear + '_Manual',
+  folder: 'earthengine/ghsl_tiles',
+  region: roi,
+  scale: 100,
+  maxPixels: 1e13,
+  fileFormat: 'GeoTIFF'
+});
+*/
