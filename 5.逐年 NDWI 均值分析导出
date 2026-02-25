@@ -1,0 +1,84 @@
+// 定义几何区域
+var geometry = ee.FeatureCollection("projects/ee-linrane111/assets/eeds");
+Map.addLayer(geometry, {}, "城市边界");
+Map.centerObject(geometry, 8);
+
+
+// 加载数据集
+var dataset = ee.ImageCollection("LANDSAT/COMPOSITES/C02/T1_L2_ANNUAL_NDWI");
+
+// 定义年份范围
+var startYear = 2014;
+var endYear = 2024;
+var years = ee.List.sequence(startYear, endYear);
+
+// 创建一个函数计算每年的NDWI均值
+var annualMeanNDWI = years.map(function(year) {
+  year = ee.Number(year);
+  var startDate = ee.Date.fromYMD(year, 1, 1);
+  var endDate = ee.Date.fromYMD(year, 12, 31);
+
+  // 筛选数据并计算均值
+  var meanNDWI = dataset
+    .filterDate(startDate, endDate)
+    .select('NDWI')
+    .mean()
+    .reduceRegion({
+      reducer: ee.Reducer.mean(),
+      geometry: geometry,
+      scale: 1000,
+      maxPixels: 1e13
+    })
+    .get('NDWI');
+
+  // 返回年份和均值
+  return ee.Feature(null, {
+    year: year,
+    meanNDWI: meanNDWI
+  });
+});
+
+// 转换为FeatureCollection
+var annualMeanNDWICollection = ee.FeatureCollection(annualMeanNDWI);
+
+// 打印结果到控制台
+print('Annual Mean NDWI:', annualMeanNDWICollection);
+
+// 可视化折线图
+var chart = ui.Chart.feature.byFeature({
+  features: annualMeanNDWICollection,
+  xProperty: 'year',
+  yProperties: ['meanNDWI']
+}).setChartType('LineChart').setOptions({
+  title: 'Annual Mean NDWI (1984-2024)',
+  hAxis: { title: 'Year' },
+  vAxis: { title: 'Mean NDWI' },
+  lineWidth: 2,
+  pointSize: 4
+});
+
+// 将折线图添加到面板
+print(chart);
+
+// 导出每年NDWI均值影像至Google Drive
+years.getInfo().forEach(function(year) {
+  var startDate = year + '-01-01';
+  var endDate = year + '-12-31';
+  
+  var yearCollection = dataset
+    .filterDate(startDate, endDate)
+    .select('NDWI')
+    .mean()
+    .clip(geometry);
+  
+  Export.image.toDrive({
+    image: yearCollection,
+    description: 'NDWI_' + year,
+    fileNamePrefix: 'NDWI_' + year,
+    scale: 100,
+    region: geometry,
+    maxPixels: 1e13,
+    crs: "EPSG:4326",
+    folder: 'NDWI_Exports'
+  });
+});
