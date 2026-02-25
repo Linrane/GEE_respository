@@ -1,0 +1,68 @@
+var HLJProvince = ee.FeatureCollection("users/studyroomGEE/A_Paper/PSPR/HLJProvince");
+var roi = HLJProvince;
+Map.addLayer(roi,{'color':'grey'},'roi');
+Map.centerObject(roi);
+function randomColor(){     
+   var letters='0123456789ABCDEF';     
+   var ret='#';     
+   for (var i = 0; i < 6; i++){  
+    ret += letters[Math.round(Math.random() * 15)];  
+  }     
+   return ret;
+}
+function randomColor2(){
+   var strTmp = '#' + Math.random().toString(16).substr(2, 6);
+  return strTmp.toUpperCase();
+}
+var geoSequence = [];
+for(var year=1990;year<=2021;year++){
+  var imgName = 'users/chengkangmk/A_PSPR/v4/HLJRice_L578_Year_'+year+'v4';
+  var imgData = ee.Image(imgName).rename('riceMap');
+  var imgDataCentroid = centroidFun(imgData,roi,500);
+  var colorRender = randomColor2();
+  Map.addLayer(imgDataCentroid,{'color':colorRender},'imgDataCentroid-'+year,false);
+  Export.table.toDrive({
+    collection:ee.FeatureCollection(imgDataCentroid),
+    description: "GeoCentroid_Year_"+year,
+    folder:'A_PSPR',
+    fileFormat:"SHP"
+  });
+  year = year+4;
+  geoSequence.push(imgDataCentroid.geometry().coordinates());
+}
+var geoSequence = ee.Geometry.LineString(geoSequence);
+Map.addLayer(geoSequence,null,'geoSequence');
+Export.table.toDrive({
+  collection:ee.FeatureCollection(geoSequence),
+  description: "geoSequence",
+  folder:'A_PSPR',
+  fileFormat:"SHP"
+});
+function centroidFun(img,studyResion,scaleMeter){
+  /***********************************************************************************
+   * Parameter definition
+   * img: ee.Image() class that is the image used to compute the geo-centroid
+   * studyResion: ee.ImageCollection class that defines the image geo-scope
+   ************************************************************************************/
+  var roiSta = studyResion;
+  var imgSta = img.addBands(ee.Image.pixelLonLat()).clip(roiSta);
+  var imgMask = imgSta.select("riceMap").eq(1);
+  var imgLon = imgMask.multiply(imgSta.select('longitude')).rename("imgLon").updateMask(imgMask);
+  var imgLat = imgMask.multiply(imgSta.select('latitude')).rename("imgLat").updateMask(imgMask);
+  var lonCentroid = imgLon.reduceRegion({
+    reducer:ee.Reducer.mean(),
+    geometry:roiSta.geometry(),
+    scale:scaleMeter,
+    maxPixels:1e13,
+    // tileScale:16
+  }).values().get(0);
+  var latCentroid = imgLat.reduceRegion({
+    reducer:ee.Reducer.mean(),
+    geometry:roiSta.geometry(),
+    scale:scaleMeter,
+    maxPixels:1e13,
+    // tileScale:16
+  }).values().get(0);
+  var cenPoint = ee.Geometry.Point([lonCentroid,latCentroid]);
+  return ee.Feature(cenPoint);
+}
