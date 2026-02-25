@@ -1,0 +1,127 @@
+// -------------------------- 1. 基础参数设置 --------------------------
+var tongliao = ee.FeatureCollection("projects/ee-linrane111/assets/tongliao")
+  .geometry();
+
+var year2015 = ee.DateRange('2015-05-01', '2015-09-30');
+var year2025 = ee.DateRange('2025-05-01', '2025-09-30');
+var targetScale = 16;
+
+// -------------------------- 2. 数据加载与预处理 --------------------------
+var l8 = ee.ImageCollection('LANDSAT/LC08/C02/T1_L2');
+var l9 = ee.ImageCollection('LANDSAT/LC09/C02/T1_L2');
+var landsatCol = l8.merge(l9);
+
+function maskCloudsSnow(image) {
+  var qa = image.select('QA_PIXEL');
+  var cloud = qa.bitwiseAnd(1 << 3).eq(0);
+  var cirrus = qa.bitwiseAnd(1 << 4).eq(0);
+  var snow = qa.bitwiseAnd(1 << 5).eq(0);
+  var mask = cloud.and(cirrus).and(snow);
+  
+  return image.updateMask(mask)
+    .select(['SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B6', 'SR_B7'])
+    .divide(10000)
+    .addBands(image.normalizedDifference(['SR_B5', 'SR_B4']).rename('NDVI'));
+}
+
+// -------------------------- 3. FVC计算核心函数 --------------------------
+function calculateFVC(dateRange) {
+  var filteredCol = landsatCol
+    .filterBounds(tongliao)
+    .filterDate(dateRange)
+    .map(maskCloudsSnow)
+    .select('NDVI');
+  
+  var imgCount = filteredCol.size();
+  print('有效影像数量', imgCount);
+  if (imgCount.eq(0).getInfo()) {
+    throw '该时间范围内无有效影像，请调整时间范围';
+  }
+  
+  var ndviMax = filteredCol.max()
+    .clip(tongliao)
+    .rename('NDVI_max');
+  
+  // 修正分位数键名获取逻辑
+  var ndviStats = ndviMax.reduceRegion({
+    reducer: ee.Reducer.percentile([5, 95]),
+    geometry: tongliao,
+    scale: targetScale,
+    maxPixels: 1e13
+  });
+  
+  // 使用默认键名（波段名_分位数）
+  var ndviBare = ee.Number(ndviStats.get('NDVI_max_p5'));
+  var ndviVeg = ee.Number(ndviStats.get('NDVI_max_p95'));
+  
+  var fvc = ndviMax.subtract(ndviBare)
+    .divide(ndviVeg.subtract(ndviBare))
+    .clamp(0, 1)
+    .rename('FVC');
+  
+  return {
+    ndvi: ndviMax,
+    fvc: fvc
+  };
+}
+
+// -------------------------- 4. 计算2015年和2025年FVC --------------------------
+var result2015 = calculateFVC(year2015);
+var result2025 = calculateFVC(year2025);
+
+// -------------------------- 5. 可视化设置 --------------------------
+Map.centerObject(tongliao, 8);
+Map.addLayer(tongliao, {color: 'FF0000', fillColor: '00000000'}, '通辽边界');
+
+var ndviVis = {min: -0.2, max: 0.8, palette: ['1a9850', 'f7f7f7', 'd73027']};
+var fvcVis = {min: 0, max: 1, palette: ['#ffffcc', '#c2e699', '#78c679', '#238443', '#005a32']};
+
+Map.addLayer(result2015.ndvi, ndviVis, '2015年NDVI');
+Map.addLayer(result2015.fvc, fvcVis, '2015年FVC');
+Map.addLayer(result2025.ndvi, ndviVis, '2025年NDVI');
+Map.addLayer(result2025.fvc, fvcVis, '2025年FVC');
+
+// -------------------------- 6. 导出结果到Google Drive --------------------------
+Export.image.toDrive({
+  image: result2015.fvc,
+  description: 'Tongliao_FVC_2015_16m',
+  folder: 'GEE_FVC_Results',
+  fileNamePrefix: 'Tongliao_FVC_2015',
+  region: tongliao,
+  scale: targetScale,
+  crs: 'EPSG:4326',
+  maxPixels: 1e13
+});
+
+Export.image.toDrive({
+  image: result2025.fvc,
+  description: 'Tongliao_FVC_2025_16m',
+  folder: 'GEE_FVC_Results',
+  fileNamePrefix: 'Tongliao_FVC_2025',
+  region: tongliao,
+  scale: targetScale,
+  crs: 'EPSG:4326',
+  maxPixels: 1e13
+});
+
+Export.image.toDrive({
+  image: result2015.ndvi,
+  description: 'Tongliao_NDVI_2015_16m',
+  folder: 'GEE_FVC_Results',
+  fileNamePrefix: 'Tongliao_NDVI_2015',
+  region: tongliao,
+  scale: targetScale,
+  crs: 'EPSG:4326',
+  maxPixels: 1e13
+});
+
+Export.image.toDrive({
+  image: result2025.ndvi,
+  description: 'Tongliao_NDVI_2025_16m',
+  folder: 'GEE_FVC_Results',
+  fileNamePrefix: 'Tongliao_NDVI_2025',
+  region: tongliao,
+  scale: targetScale,
+  crs: 'EPSG:4326',
+  maxPixels: 1e13
+});
