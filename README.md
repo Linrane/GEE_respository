@@ -385,3 +385,13 @@ Python:
 
 8.美化图表：调整刻度字体大小、添加图例（左上）、网格（透明度 0.5），优化布局并显示图表
 ```
+
+# 16.最新版（2024）CLCD
+
+本代码为文章引用，原文章地址为：https://mp.weixin.qq.com/s/uRmT5aO6vB9LXqCmp2eFGQ
+
+代码运行：https://code.earthengine.google.com/c8b7f8c215b3ef79c704bf05e32b4fcc
+
+整体实现思路：这个就不用写了，因为本来就是一个数据集，直接用就行了
+
+# 17.
