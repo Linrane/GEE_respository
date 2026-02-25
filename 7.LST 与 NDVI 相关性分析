@@ -1,0 +1,290 @@
+// 定义研究区域（AOI）和时间范围
+var AOI = ee.FeatureCollection("projects/ee-linrane111/assets/eeds");
+Map.addLayer(AOI, {}, "城市边界");
+Map.centerObject(AOI, 10);
+
+// 加载Landsat 8影像
+var landsat8 = ee.ImageCollection('LANDSAT/LC08/C02/T1')
+  .filterDate('2024-04-01', '2024-07-30')          // 过滤日期范围
+  .filter(ee.Filter.lt('CLOUD_COVER', 10))         // 选择云量低于10%的影像
+  .median()                                        // 计算中值合成影像
+  .clip(AOI);                                      // 裁剪到研究区域
+
+// 计算NDVI的函数
+var calculateNDVI = function(image) {
+  // NDVI计算公式：(B5 - B4)/(B5 + B4)
+  var ndvi = image.normalizedDifference(['B5', 'B4']).rename('NDVI');
+  return image.addBands(ndvi);
+};
+
+// 计算地表发射率的函数
+var calculateEmissivity = function(image) {
+  var ndvi = image.select('NDVI');
+  var emissivity = ndvi.multiply(0.0003342).add(0.1); // 基于NDVI的发射率估算公式
+  return image.addBands(emissivity.rename('EMISSIVITY'));
+};
+
+// 计算地表温度（LST）的函数
+var calculateLST = function(image) {
+  var thermalBand = image.select('B10'); // 热红外波段
+
+  // Landsat 8校准常数
+  var K1 = 774.8853; // 校准常数1
+  var K2 = 1321.0789; // 校准常数2
+
+  // 将DN值转换为大气顶层辐射亮度
+  var toaRadiance = thermalBand.multiply(0.0003342).add(0.1);
+
+  // 将辐射亮度转换为亮温（单位：摄氏度）
+  var brightnessTemp = toaRadiance.expression(
+    '(K2 / (log((K1 / L) + 1))) - 273.15', {
+      'K1': K1,
+      'K2': K2,
+      'L': toaRadiance
+    }
+  ).rename('BRIGHTNESS_TEMP');
+
+  // 使用发射率计算真实地表温度
+  var emissivity = image.select('EMISSIVITY');
+  var lst = brightnessTemp.expression(
+    '(BT / (1 + (0.00115 * BT / 1.4388) * log(emissivity)))', {
+      'BT': brightnessTemp,
+      'emissivity': emissivity
+    }
+  ).rename('LST');
+
+  return image.addBands(lst);
+};
+
+// 执行计算流程
+var ndviImage = calculateNDVI(landsat8);             // 计算NDVI
+var emissivityImage = calculateEmissivity(ndviImage); // 计算发射率
+var lstImage = calculateLST(emissivityImage);       // 计算地表温度
+
+// 打印LST图像信息
+print('地表温度图像:', lstImage);
+
+// 计算区域统计值
+var lstValue = lstImage.select('LST').reduceRegion({
+  reducer: ee.Reducer.min().combine({               // 组合统计量计算
+    reducer2: ee.Reducer.max(),
+    sharedInputs: true
+  }).combine({
+    reducer2: ee.Reducer.mean(),
+    sharedInputs: true
+  }),
+  geometry: AOI,                                   // 统计区域
+  scale: 30,                                       // 空间分辨率
+  maxPixels: 1e13                                  // 最大像素数
+});
+print("地表温度统计:", lstValue);
+
+// 提取统计值并格式化
+var minLST = lstValue.get('LST_min');
+var maxLST = lstValue.get('LST_max');
+var meanLST = lstValue.get('LST_mean');
+
+// 创建统计结果显示面板
+var lst_Stats_Text = [
+  ['最小值', minLST.getInfo().toFixed(2) + ' °C'],
+  ['最大值', maxLST.getInfo().toFixed(2) + ' °C'],
+  ['平均值', meanLST.getInfo().toFixed(2) + ' °C']
+];
+
+// 统计面板样式设置
+var lst_stat_panel = ui.Panel({
+  style: {
+    position: 'bottom-left',      // 面板位置
+    padding: '10px 10px',         // 内边距
+    backgroundColor: 'white',     // 背景颜色
+    border: '1px solid black'     // 边框样式
+  }
+});
+
+// 统计标题
+var lst_stat_heading = ui.Label({
+  value: '地表温度统计',
+  style: {
+    fontWeight: 'bold',           // 加粗字体
+    fontSize: '20px',             // 字号
+    margin: '0 0 4px 0',          // 外边距
+    color: 'black',               // 文字颜色
+    position: 'top-center'        // 标题位置
+    
+  }
+});
+
+
+// 构建统计信息表格
+lst_stat_panel.add(lst_stat_heading);
+for (var i = 0; i < lst_Stats_Text.length; i++) {
+  var row = ui.Panel({
+    layout: ui.Panel.Layout.flow('horizontal'),
+    style: { margin: '0 0 4px 0' }
+  });
+  for (var j = 0; j < lst_Stats_Text[i].length; j++) {
+    row.add(ui.Label({
+      value: lst_Stats_Text[i][j],
+      style: {padding: '4px 4px', fontSize: '14px', color: 'black'}
+    }));
+  }
+  lst_stat_panel.add(row);
+}
+
+// 采样分析NDVI与LST相关性
+var sample = lstImage.select(['LST', 'NDVI']).sample({
+  region: AOI,     // 采样区域
+  scale: 30,       // 采样分辨率
+  numPixels: 1000  // 采样点数量
+});
+
+// 计算皮尔逊相关系数
+var correlation = sample.reduceColumns({
+  reducer: ee.Reducer.pearsonsCorrelation(), // 相关性分析算法
+  selectors: ['LST', 'NDVI']                 // 分析字段
+});
+print('LST与NDVI相关系数:', correlation);
+
+// 创建散点图
+var chart = ui.Chart.feature.byFeature({
+  features: sample,
+  xProperty: 'NDVI',
+  yProperties: 'LST'
+}).setChartType('ScatterChart').setOptions({
+  title: 'LST与NDVI相关性分析',       // 图表标题
+  hAxis: {title: 'NDVI'},           // X轴标签
+  vAxis: {title: 'LST (°C)'},       // Y轴标签
+  pointSize: 1,                      // 点大小
+  trendlines: {0: {color: 'red'}},   // 趋势线
+});
+print(chart);
+
+// 可视化参数设置
+var LST_VIS = {min: 20, max: 45, palette: ["0400ff","37ff00","fff875","ffb1d7","ff0000"]};
+var NDVI_VIS = {min: -1, max: 1, palette: ["0008ff","ff0808","fffd2a","5aff5c","16b300"]};
+
+// 创建图例函数
+function createLSTLegend() {
+  var legend = ui.Panel({
+    style: {
+      position: 'bottom-right',
+      padding: '8px 15px',
+      backgroundColor: 'white',
+      border: '1px solid black'
+    }
+  });
+
+  var title = ui.Label({
+    value: '地表温度 (°C)',
+    style: { fontWeight: 'bold', fontSize: '14px', margin: '0 0 4px 0' }
+  });
+  legend.add(title);
+
+  var palette = LST_VIS.palette;
+  var labels = ['20-25 (极低)', '25-30 (低)', '30-35 (中)', '35-40 (高)', '40-45 (极高)'];
+
+  for (var i = 0; i < palette.length; i++) {
+    var colorBox = ui.Label({
+      style: {
+        backgroundColor: '#' + palette[i],
+        padding: '8px',
+        margin: '0 0 4px 0'
+      }
+    });
+    var label = ui.Label({
+      value: labels[i],
+      style: { margin: '0 0 4px 10px', fontSize: '12px' }
+    });
+    var row = ui.Panel({
+      widgets: [colorBox, label],
+      layout: ui.Panel.Layout.flow('horizontal')
+    });
+    legend.add(row);
+  }
+  return legend;
+}
+
+function createNDVILegend() {
+  var legend = ui.Panel({
+    style: {
+      position: 'bottom-right',
+      padding: '8px 15px',
+      backgroundColor: 'white',
+      border: '1px solid black'
+    }
+  });
+
+  var title = ui.Label({
+    value: 'NDVI 指数',
+    style: { fontWeight: 'bold', fontSize: '14px', margin: '0 0 4px 0' }
+  });
+  legend.add(title);
+
+  var palette = NDVI_VIS.palette;
+  var min = NDVI_VIS.min;
+  var max = NDVI_VIS.max;
+  var step = (max - min) / palette.length;
+
+  for (var i = 0; i < palette.length; i++) {
+    var start = (min + i * step).toFixed(1);
+    var end = (min + (i + 1) * step).toFixed(1);
+    var colorBox = ui.Label({
+      style: {
+        backgroundColor: '#' + palette[i],
+        padding: '8px',
+        margin: '0 0 4px 0'
+      }
+    });
+    var label = ui.Label({
+      value: start + ' - ' + end,
+      style: { margin: '0 0 4px 10px', fontSize: '12px' }
+    });
+    var row = ui.Panel({
+      widgets: [colorBox, label],
+      layout: ui.Panel.Layout.flow('horizontal')
+    });
+    legend.add(row);
+  }
+  return legend;
+}
+
+// 全局变量管理图例
+var currentLegend = null;
+
+// 修改地图切换控件
+var dropdown = ui.Select({
+  items: ['选择地图','地表温度', '植被指数'],
+  style: {position: 'top-left'},
+  onChange: function(selected) {
+    Map.layers().reset();
+    // 清除之前的图例和统计面板
+    if (currentLegend) {
+      Map.remove(currentLegend);
+      currentLegend = null;
+    }
+    if (selected !== '地表温度') {
+      Map.remove(lst_stat_panel);
+    }
+
+    if (selected === '选择地图'){
+      Map.addLayer(AOI.style({color: '000000',fillColor: '00000000',width: 1}), {}, "城市边界");
+      Map.centerObject(AOI, 9.6);
+    } else if (selected === '地表温度') {
+      Map.add(lst_stat_panel);
+      Map.addLayer(AOI, {}, "城市边界");
+      Map.addLayer(lstImage.select('LST'), LST_VIS, '地表温度');
+      
+      currentLegend = createLSTLegend();
+      Map.add(currentLegend);
+    } else if (selected === '植被指数') {
+      Map.addLayer(AOI, {}, "城市边界");
+      Map.addLayer(ndviImage.select('NDVI'), NDVI_VIS, '植被指数');
+      currentLegend = createNDVILegend();
+      Map.add(currentLegend);
+    }
+  }
+});
+
+// 初始化地图
+Map.add(dropdown);
+dropdown.setValue('选择地图');
