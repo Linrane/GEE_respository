@@ -1,0 +1,60 @@
+// 1. 定义研究区域（与原始数据一致）
+var geometry = ee.FeatureCollection("projects/ee-linrane111/assets/eeds");
+Map.centerObject(geometry, 7);
+
+// 2. NDVI可视化参数
+var ndviVis = {
+  min: 0,
+  max: 0.8,
+  palette: ['#000080', '#00FF00', '#FF0000']
+};
+
+// 3. 云掩膜函数（标准S2处理）
+function maskS2clouds(image) {
+  var qa = image.select('QA60');
+  var cloudMask = qa.bitwiseAnd(1 << 10).eq(0)
+                  .and(qa.bitwiseAnd(1 << 11).eq(0));
+  return image.updateMask(cloudMask);
+}
+
+// 4. NDVI计算（GEE内置函数，高效）并裁剪到[0,1]范围
+function createNDVI(image) {
+  var ndvi = image.normalizedDifference(['B8', 'B4']).rename('NDVI');
+  // 将NDVI值限制在0到1之间，避免负值和超过1的情况
+  ndvi = ndvi.clamp(0, 1);
+  return image.addBands(ndvi);
+}
+
+// 5. 影像集合构建（2016-2025年，10m分辨率）
+var S2_COL = ee.ImageCollection("COPERNICUS/S2_HARMONIZED")
+  .filterDate("2016-01-01", "2017-12-31")
+  .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 20))
+  .filterBounds(geometry)
+  .map(maskS2clouds)
+  .map(createNDVI)
+  .select('NDVI');
+
+// 6. 年度NDVI处理（2016-2025年，10年数据）
+var years = ee.List.sequence(2015, 2025);
+years.getInfo().forEach(function(year) {
+  var annualNDVI = S2_COL
+    .filter(ee.Filter.calendarRange(year, year, 'year'))
+    .max()
+    .set('year', year)
+    .set('system:time_start', ee.Date.fromYMD(year, 1, 1));
+
+  // 地图显示：使用原始10m数据（自动优化加载速度）
+  Map.addLayer(annualNDVI.clip(geometry), ndviVis, 'NDVI_' + year);
+  
+  // 导出设置：scale=10（确保ArcGIS看到10m分辨率）
+  Export.image.toDrive({
+    image: annualNDVI.clip(geometry),
+    description: 'NDVI_' + year,
+    fileNamePrefix: 'NDVI_' + year,
+    folder: 'sentinel_NDVI',
+    region: geometry,
+    scale: 10,  // ✅ 关键修改：10m分辨率
+    crs: "EPSG:4326",
+    maxPixels: 1e13
+  });
+});
