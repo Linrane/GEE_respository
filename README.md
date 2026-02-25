@@ -242,7 +242,7 @@
 
 （注：从第十一个开始我会开始注明是个人编写还是从文章中拿过来用的，并且会附带好文章地址，请各位尊重原创！尊重别人的劳动成功）
 
-本文为文章引用，原文章地址为：https://mp.weixin.qq.com/s/SotWDGJAbNfgWVZzgK7l4g
+本代码为文章引用，原文章地址为：https://mp.weixin.qq.com/s/SotWDGJAbNfgWVZzgK7l4g
 
 代码运行：https://code.earthengine.google.com/45323fa628c4a9c35fae3e1e2d639182
 
@@ -264,4 +264,28 @@
 7.将地图中心定位到经纬度 (19.514, 51.82)，缩放级别设为 8
 ```
 
+# 12.Sential2较好去云数据集示例
 
+本代码为文章引用，原文章地址为：https://mp.weixin.qq.com/s/sCIY_kxpNVEBIj07_xbUrg
+
+代码运行：https://code.earthengine.google.com/1f49de41a5d2aa0253068d876f48fc64
+
+整体实现思路如下;
+
+```
+1.加载哨兵 2 SR Harmonized（L2A）影像集和 Google Cloud Score + 云评分影像集
+
+2.定义感兴趣区（ROI）为经纬度 (-119.9087, 37.4159) 的点要素
+
+3.设定云评分波段为 'cs_cdf'，云掩膜阈值为 0.60（高于该值判定为晴空）
+
+4。筛选 2023 年 1-2 月 ROI 范围内的 S2 影像，关联 Cloud Score + 数据集并提取指定云评分波段
+
+5.遍历影像集，基于云评分阈值掩膜掉云像素，仅保留晴空像素
+
+6.对掩膜后的影像集计算中值合成，生成无云 / 少云的均值影像
+
+7.配置 S2 真彩色可视化参数（B4/B3/B2 波段），将合成影像添加到地图展示
+
+8.将地图中心定位到 ROI，缩放级别设为 11
+```
