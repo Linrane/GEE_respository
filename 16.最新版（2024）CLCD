@@ -1,0 +1,29 @@
+/******************************************************************************************
+ * Here is the LULC collection of China developed by Professor Huang Xin.
+ * Detailed information is provided as follow:
+ * Yang J, Huang X. The 30 m annual land cover dataset and its dynamics 
+ * in China from 1990 to 2019[J]. Earth System Science Data, 2021, 13(8): 3907-3925.
+ * Here, we, GEEAI StudyRoom, only upload the LULC Collection with the aim of providing portable usage 
+ * on GEE for all people.
+ * Note, when you need LULC map of a specific year, change the year variable is all needed.
+ * The year varible in this collection can be chosen: 1985 or any number in 1990-2024
+ ********************************************************************************************/
+var year = 2000;
+// var imgPathCLCD = 'users/studyroomGEE/LULC_Dataset/LULC_HuangXin/CLCD_v01_'+year;
+var imgPathCLCD = 'projects/lulc-datase/assets/LULC_HuangXin/CLCD_v01_'+year;
+var imgCLCD = ee.Image(imgPathCLCD);
+imgCLCD = imgCLCD.updateMask(imgCLCD.gt(0));
+var visPaletteCLCD = [
+  '#FAE39C', // cropland-1
+  '#446F33', // forest-2
+  '#33A02C', // shrub-3
+  '#ABD37B', // grassland-4
+  '#1E69B4', // water -5
+  '#A6CEE3', // snow/ice-6
+  '#CFBDA3', // barren-7
+  '#E24290', // impervious-8
+  '#289BE8', // wetland-9
+];
+// Map.addLayer(imgCLCD.randomVisualizer(),null,'imgLULC-Huang-'+year);
+Map.addLayer(imgCLCD,{'min':1,'max':9,'palette':visPaletteCLCD},'imgLULC-Huang-'+year);
+Map.setCenter(116.262, 39.949,3);
