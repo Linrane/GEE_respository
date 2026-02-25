@@ -1,0 +1,98 @@
+// 导入研究区域 - 使用鄂尔多斯资产
+var roi = ee.FeatureCollection('projects/ee-linrane111/assets/eeds');
+Map.centerObject(roi, 6);
+Map.addLayer(roi, {"color": "red"}, "鄂尔多斯市");
+
+//还原缩放
+function applyScaleFactors(image){
+  var opticalBands = image.select('SR_B.').multiply(0.0000275).add(-0.2);
+  var thermalBands = image.select('ST_B.*').multiply(0.00341802).add(149.0);
+  return image.addBands(opticalBands, null, true)
+              .addBands(thermalBands, null, true);
+}
+
+//定义去云掩膜函数 - 放宽条件：只去除高置信度云，保留薄云和云阴影
+function Mask(image){
+  var cloudMask = (1<<3);      // 高置信度云
+  var cloudshadowMask = (1<<4); // 云阴影
+  var QA = image.select("QA_PIXEL");
+  // 使用或运算：只屏蔽高置信度云和云阴影，保留其他情况
+  var mask = QA.bitwiseAnd(cloudMask).eq(0).and(QA.bitwiseAnd(cloudshadowMask).eq(0));
+  return image.updateMask(mask);
+}
+
+//对L5/L7/L8影像进行处理
+var years = ee.List.sequence(2000, 2011);
+var L5_COL = ee.ImageCollection(years
+  .map(function(y) {
+    var start = ee.Date.fromYMD(y, 1, 1);
+    var end = start.advance(12, 'month');
+    var ndvi = ee.ImageCollection('LANDSAT/LT05/C02/T1_L2')
+                  .filterDate(start, end)
+                  .map(applyScaleFactors)
+                  .map(Mask)
+                  .map(function(image){
+                    var ndvi = image.normalizedDifference(['SR_B4', 'SR_B3']).rename('NDVI');
+                    return image.addBands(ndvi);
+                  });
+    return ndvi.reduce(ee.Reducer.median()).clip(roi)
+                  .set('Year',y);
+}));
+print (L5_COL);
+
+var years = ee.List.sequence(2012, 2012);
+var L7_COL = ee.ImageCollection(years
+  .map(function(y) {
+    var start = ee.Date.fromYMD(y, 1, 1);
+    var end = start.advance(12, 'month');
+    var ndvi = ee.ImageCollection('LANDSAT/LE07/C02/T1_L2')
+                  .filterDate(start, end)
+                  .map(applyScaleFactors)
+                  .map(Mask)
+                  .map(function(image){
+                    var ndvi = image.normalizedDifference(['SR_B4', 'SR_B3']).rename('NDVI');
+                    return image.addBands(ndvi);
+                  });
+    return ndvi.reduce(ee.Reducer.median()).clip(roi)
+                  .set('Year',y);
+}));
+print (L7_COL);
+
+var years = ee.List.sequence(2013, 2023);
+var L8_COL = ee.ImageCollection(years
+  .map(function(y) {
+    var start = ee.Date.fromYMD(y, 1, 1);
+    var end = start.advance(12, 'month');
+    var ndvi = ee.ImageCollection('LANDSAT/LC08/C02/T1_L2')
+                  .filterDate(start, end)
+                  .map(applyScaleFactors)
+                  .map(Mask)
+                  .map(function(image){
+                    var ndvi = image.normalizedDifference(['SR_B5', 'SR_B4']).rename('NDVI');
+                    return image.addBands(ndvi);
+                  });
+    return ndvi.reduce(ee.Reducer.median()).clip(roi)
+                  .set('Year',y);
+}));
+print (L8_COL);
+
+var data = ee.ImageCollection(L5_COL.merge(L7_COL).merge(L8_COL));
+print(data);
+
+// 修改图表：调整Y轴范围适应干旱区低NDVI特征，并设置最小显示值避免空白
+var yearlychart = ui.Chart.image.series({
+    imageCollection: data.select('NDVI_median'),
+    region: roi,
+    reducer: ee.Reducer.mean(),
+    scale: 500,
+    xProperty:'Year'
+    }).setOptions({
+      interpolateNulls: true,
+      lineWidth: 2,
+      title: 'NDVI Daily Time Seires',
+      // 调整Y轴：鄂尔多斯NDVI通常在0-0.3之间，原0.4-0.8范围过高导致看不到数据
+      vAxis: {title: 'NDVI', viewWindow: {max: 0.35, min: -0.1}},
+      hAxis: {title: 'Date'},
+      trendlines: { 0: {title: 'NDVI_trend', type:'linear', showR2: true, color:'red', visibleInLegend: true}}
+    });
+print(yearlychart);
