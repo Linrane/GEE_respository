@@ -1,0 +1,129 @@
+// 导入研究区域 - 使用鄂尔多斯资产
+var roi = ee.FeatureCollection('projects/ee-linrane111/assets/eeds');
+Map.centerObject(roi, 6);
+Map.addLayer(roi, {"color": "red"}, "鄂尔多斯市");
+
+function maskL8sr(image) {
+  // Bit 0 - Fill
+  // Bit 1 - Dilated Cloud
+  // Bit 2 - Cirrus
+  // Bit 3 - Cloud
+  // Bit 4 - Cloud Shadow
+  var qaMask = image.select('QA_PIXEL').bitwiseAnd(parseInt('11111', 2)).eq(0);
+  var saturationMask = image.select('QA_RADSAT').eq(0);
+
+  // Apply the scaling factors to the appropriate bands.
+  var opticalBands = image.select('SR_B.').multiply(0.0000275).add(-0.2);
+  var thermalBands = image.select('ST_B.*').multiply(0.00341802).add(149.0);
+
+  // Replace the original bands with the scaled ones and apply the masks.
+  return image.addBands(opticalBands, null, true)
+      .addBands(thermalBands, null, true)
+      .updateMask(qaMask)
+      .updateMask(saturationMask);
+}
+Map.centerObject(roi,7)
+var styling = {color:"red",fillColor:"00000000"};
+Map.addLayer(roi.style(styling),{},"geometry")
+var img = ee.ImageCollection("LANDSAT/LC08/C02/T1_L2")
+                  .filterDate("2024-5-01", "2024-10-30")
+                  .filterBounds(roi)
+                  // Pre-filter to get less cloudy granules.
+                  .filter(ee.Filter.lte('CLOUD_COVER',10))//云量设置
+                  .map(maskL8sr)
+                  .mosaic()
+                  .clip(roi);
+print(img)
+var visualization = {
+
+  min: 0.0,
+  max: 0.3,
+  bands: ['SR_B4', 'SR_B3', 'SR_B2'],
+};
+Map.addLayer(img, visualization, 'RGB');
+
+var lcV1 = ee.ImageCollection('GOOGLE/DYNAMICWORLD/V1')
+           .filterDate("2024-7-01", "2024-9-30")
+           .filterBounds(roi).select('label').map(function(image){
+    return image.clip(roi)
+  })
+  .mosaic()
+  //.divide(255);
+print(lcV1)
+
+// 将土地覆盖类别值重新映射到基于 0 的序列.
+var classValues = [0, 1, 2, 3, 4, 5, 6, 7, 8];
+var remapValues = ee.List.sequence(0, 8);
+var label = 'lcV1';
+lcV1 = lcV1.remap(classValues, remapValues).rename(label).toByte();
+
+// 将土地覆盖添加为反射率图像的一个波段，并在感兴趣区域内的每个土地覆盖类别中以 10 米的尺度采样 200 个像素。
+var sample = img.addBands(lcV1).stratifiedSample({
+    numPoints: 100,
+    classBand: label,
+    region: roi,
+    scale: 10,
+    geometries: true});
+  
+print(sample)
+
+// 向样本添加一个随机值字段，并使用它将大约 80%
+// 的特征分成训练集，20% 分成验证集。
+sample = sample.randomColumn();
+var trainingSample = sample.filter('random <= 0.8');
+var validationSample = sample.filter('random > 0.8');
+Map.addLayer(trainingSample,{color:'red'},'训练样本')
+Map.addLayer(validationSample ,{color:'blue'},'验证样本')
+
+var trainedClassifier = ee.Classifier.smileRandomForest(50)
+    .train({
+      features: trainingSample,
+      classProperty: label,
+      inputProperties: img.bandNames()
+    });
+print('分类结果', trainedClassifier.explain());
+
+// 混淆矩阵
+var testAccuracy = trainedClassifier.confusionMatrix();
+
+// 总体分类精度
+var accuracy = testAccuracy.accuracy();
+
+// 用户分类精度
+var userAccuracy = testAccuracy.consumersAccuracy();
+
+// 生产者精度
+var producersAccuracy = testAccuracy.producersAccuracy();
+
+// Kappa系数
+var kappa = testAccuracy.kappa();
+
+print('混淆矩阵:', testAccuracy);
+//print('用户分类精度:', userAccuracy);//用户分类精度
+print('生产者精度:', producersAccuracy);//生产者精度
+print('总体分类精度', accuracy);//总体分类精度
+print('Kappa:', kappa);
+
+var imgClassified = img.classify(trainedClassifier).clip(roi);
+
+// Add the layers to the map.
+var classVis = {
+   min: 0,
+   max: 8,
+   palette: ['#419bdf' ,'#397d49', '#7a87c6', '#e49635', '#dfc35a', '#c4281b',
+    '#a59b8f', '#b39fe1']
+};
+
+Map.addLayer(lcV1, classVis, 'GOOGLE_V1');
+Map.addLayer(imgClassified, classVis, '分类结果');
+
+//导出函数
+Export.image.toDrive({
+  image: imgClassified,
+  description: 'RF2024a',
+  crs: "EPSG:4326",
+  scale: 30,
+  region: roi,
+  maxPixels: 1e13,
+  folder: 'RF'
+});
