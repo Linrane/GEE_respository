@@ -312,7 +312,7 @@
 
 # 14.CASA模型计算NPP
 
-本代码为文章引用，原文章地址为：https://mp.weixin.qq.com/s/Xu0C8n7VLTDVbF_NS-zZQA
+本代码为文章引用，原文章地址为：https://mp.weixin.qq.com/s/v_hHJwkKYUprddyyR_RmDw
 
 代码运行：https://code.earthengine.google.com/a59007b9b3b8fed513bbe4159ed65d93
 
