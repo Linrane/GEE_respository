@@ -1,0 +1,146 @@
+//分为两个部分，第一个部分是gee原制图情况，第二个则是python美化情况，不要混淆
+
+//第一部分
+
+// Import the example feature collection and subset the forest feature.
+var forest = ee.FeatureCollection('projects/google/charts_feature_example')
+                 .filter(ee.Filter.eq('label', 'Forest'));
+Map.addLayer(forest,{'color':'red'},'forest');
+Map.centerObject(forest);
+
+// Load MODIS vegetation indices data and subset a decade of images.
+var vegIndices = ee.ImageCollection('MODIS/061/MOD13A1')
+                     .filter(ee.Filter.date('2010-01-01', '2020-01-01'))
+                     .select(['NDVI', 'EVI']);
+
+// Define a function to format an image timestamp as a JavaScript Date string.
+function formatDate(img) {
+  var millis = img.date().millis().format();
+  return ee.String('Date(').cat(millis).cat(')');
+}
+
+// Build a feature collection where each feature has a property that represents
+// a DataFrame row.
+var reductionTable = vegIndices.map(function(img) {
+  // Reduce the image to the mean of pixels intersecting the forest ecoregion.
+  var stat = img.reduceRegion(
+      {reducer: ee.Reducer.mean(), geometry: forest, scale: 500});
+
+  // Extract the reduction results along with the image date.
+  var date = formatDate(img);   // x-axis values.
+  var evi = stat.get('EVI');    // y-axis series 1 values.
+  var ndvi = stat.get('NDVI');  // y-axis series 2 values.
+
+  // Make a list of observation attributes to define a row in the DataTable.
+  var row = ee.List([date, evi, ndvi]);
+
+  // Return the row as a property of an ee.Feature.
+  return ee.Feature(null, {'row': row});
+});
+
+// Aggregate the 'row' property from all features in the new feature collection
+// to make a server-side 2-D list (DataTable).
+var dataTableServer = reductionTable.aggregate_array('row');
+
+// Define column names and properties for the DataTable. The order should
+// correspond to the order in the construction of the 'row' property above.
+var columnHeader = ee.List([[
+  {label: 'Date', role: 'domain', type: 'date'},
+  {label: 'EVI', role: 'data', type: 'number'},
+  {label: 'NDVI', role: 'data', type: 'number'}
+]]);
+
+// Concatenate the column header to the table.
+dataTableServer = columnHeader.cat(dataTableServer);
+
+// Use 'evaluate' to transfer the server-side table to the client, define the
+// chart and print it to the console.
+dataTableServer.evaluate(function(dataTableClient) {
+  var chart = ui.Chart(dataTableClient).setOptions({
+    title: 'Average Vegetation Index Value by Date for Forest',
+    hAxis: {
+      title: 'Date',
+      titleTextStyle: {italic: false, bold: true},
+    },
+    vAxis: {
+      title: 'Vegetation index (x1e4)',
+      titleTextStyle: {italic: false, bold: true}
+    },
+    lineWidth: 5,
+    colors: ['e37d05', '1d6b99'],
+    curveType: 'function'
+  });
+  print(chart);
+});
+
+#第二部分
+geoShp = (
+    ee.Geometry.Polygon(
+        [[[-122.73294517465902, 43.89661492418068],
+          [-122.73294517465902, 43.44365581058295],
+          [-122.27151939340902, 43.44365581058295],
+          [-122.27151939340902, 43.89661492418068]]],
+        None,
+        False))
+forest = geoShp
+Map.addLayer(forest,{'color':'red'},'forest')
+Map.centerObject(forest)
+vegIndices = (
+    ee.ImageCollection('MODIS/061/MOD13A1')
+                     .filter(ee.Filter.date('2010-01-01', '2020-01-01'))
+                     .select(['NDVI', 'EVI']))
+# Define a function to format an image timestamp as a JavaScript Date string.
+def formatDate(img):
+  millis = img.date().millis() #.format('YYYY-mm-DD')
+  # return ee.String('Date(').cat(millis).cat(')')
+  return millis
+def valueExtract(img):
+    
+    stat = img.reduceRegion(**{
+       "reducer": ee.Reducer.mean(),
+       "geometry": forest,
+       "scale": 500}
+       
+    )
+    
+    # Extract the reduction results along with the image date.
+    date = formatDate(img) # x-axis values.
+    evi = stat.get('EVI') # y-axis series 1 values.
+    ndvi = stat.get('NDVI') # y-axis series 2 values.
+    row = ee.List([date, evi, ndvi])
+    
+    return ee.Feature(None, {'row': row})
+    
+reductionTable = vegIndices.map(valueExtract)
+print(reductionTable.size().getInfo())
+dataTableServer = reductionTable.aggregate_array('row')
+import pandas as pd
+dataTableValue = dataTableServer.getInfo()
+pdData = pd.DataFrame(dataTableValue, columns=["Date",'EVI','NDVI'])
+pdData
+import pandas as pd 
+import matplotlib.pyplot as plt 
+df = pdData
+# 将时间戳转换为日期格式 
+df["Date"] = pd.to_datetime(df["Date"], unit='ms') 
+# 创建图表对象 
+fig, ax = plt.subplots(figsize=(12, 6)) 
+# 绘制 EVI 和 NDVI 折线图 
+ax.plot(df["Date"], df["EVI"], label="EVI", color="blue", linewidth=2) 
+ax.plot(df["Date"], df["NDVI"], label="NDVI", color="green", linewidth=2) 
+# 添加标题和标签 
+ax.set_title("EVI and NDVI Time Series", fontsize=16, fontfamily="Times New Roman", weight="bold") 
+ax.set_xlabel("Date", fontsize=14, fontfamily="Times New Roman") 
+ax.set_ylabel("Index Value", fontsize=14, fontfamily="Times New Roman") 
+# 美化坐标轴 
+ax.tick_params(axis="both", labelsize=12) 
+for label in ax.get_xticklabels() + ax.get_yticklabels(): 
+    label.set_fontfamily("Times New Roman") 
+# 添加图例 
+ax.legend(fontsize=12, loc="upper left", prop={"family": "Times New Roman"}) 
+# 添加网格 
+ax.grid(alpha=0.5) 
+# 调整布局 
+fig.tight_layout() 
+# 显示图表 
+plt.show()
