@@ -1,0 +1,29 @@
+// 设置研究区
+var AOI = ee.Geometry.Polygon(
+        [[[-109.07262380633316, 40.99129501133321],
+          [-109.07262380633316, 36.997062151614315],
+          [-101.90953786883316, 36.997062151614315],
+          [-101.90953786883316, 40.99129501133321]]], null, false);
+// set study area
+var roi = AOI;
+Map.addLayer(roi, {'color':'grey'},'AOI');
+
+// set time parameter
+var year_start = 2020;
+var year_end = 2020;
+var imgCol = ee.ImageCollection('LANDSAT/LC08/C02/T1_L2')
+              .filterBounds(roi)
+              .filter(ee.Filter.calendarRange(year_start, year_end,'year'));
+
+// 对每个影像数据进行处理，得到其边框
+var imgTiles = ee.FeatureCollection(imgCol.map(function(img){
+  var tmpFootprint = ee.Image(img).geometry();
+  var WRS_PATH = ee.Number(ee.Image(img).get("WRS_PATH"));
+  var WRS_ROW =  ee.Number(ee.Image(img).get("WRS_ROW"));
+  return ee.Feature(tmpFootprint,null).set("WRS_PATH",WRS_PATH).set("WRS_ROW",WRS_ROW);
+})).distinct(["WRS_PATH",'WRS_ROW']);
+
+// 加载显示结果
+var styling1 = {color:'red',fillColor:'00000000'};
+print("imgTiles size",imgTiles.size());
+Map.addLayer(imgTiles.style(styling1), {}, 'imgTiles');
