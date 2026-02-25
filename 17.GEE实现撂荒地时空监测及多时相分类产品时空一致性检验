@@ -1,0 +1,90 @@
+var roi = AOI;
+Map.addLayer(roi,{'color':'grey'},'studyArea');
+// Map.centerObject(roi);
+var imgColPath = 'projects/lulc-datase/assets/LULC_HuangXin';
+var imgColDataMerge = require('users/nietaoyuan/aGEECommonModule:imgColDataMerge.js');
+var imgCol = imgColDataMerge.assemblyImgCol(imgColPath);
+// print("imgCol size",imgCol.size());
+// print("imgCol",imgCol);
+var imgCrop = imgCol.map(function(img){
+  var imgCrop = img.updateMask(img.gt(0));
+  return imgCrop.lt(2)//.unmask(0).clip(roi);
+});
+// Map.addLayer(imgCrop,{'min':0,'max':1,'palette':['white','red']}, 'imgCrop');
+var imgCropList = imgCrop.toList(imgCrop.size());
+print("imgCropList",imgCropList);
+var img20_1 = ee.Image(imgCropList.get(20));
+var visParam =  {min: 0, max: 1, palette: ['white', 'red']};
+// Map.addLayer(img20_1,visParam,'img20_1');
+// Map.addLayer(img20_1.updateMask(img20_1.gt(0)),{'palette':'red'},'img20_1');
+var imgCrop2 = imgCropList;
+var imgCropSize = imgCrop2.size();
+/***************************************************************************************
+ * temporal consitency checking
+ ****************************************************************************************/
+var imgCropList3 = ee.List.sequence(0,imgCropSize.subtract(1)).map(function(item){
+  // get the index
+  var idxMid = ee.Number(item);
+  var idxPre = ee.Number(idxMid.subtract(1)).max(0);
+  var idxPro = ee.Number(idxMid).add(1).min(imgCropSize.subtract(1));
+  // get the values
+  var valuePre = ee.Image(imgCrop2.get(idxPre)).float().rename('img');
+  var valueMid = ee.Image(imgCrop2.get(idxMid)).float().rename('img');
+  var valuePro = ee.Image(imgCrop2.get(idxPro)).float().rename('img');
+  // var valueMode = ee.List([valuePre,valueMid,valuePro]).reduce(ee.Reducer.mode());
+  var stacked = ee.ImageCollection([valuePre,valueMid,valuePro])
+                  .reduce(ee.Reducer.mode()).rename('img');
+  return stacked;
+});
+var imgCropBands = ee.ImageCollection(imgCropList3).toBands();
+Map.addLayer(imgCropBands,null,'imgCropBands');
+var serieSize = 7;
+var imgBand = [];
+for(var i=0;i<serieSize;i++){
+  imgBand.push('img'+i);
+}
+print("imgBand",imgBand);
+var imgList = ee.List.sequence(0,imgCropSize.subtract(serieSize)).map(function(idx){
+  var idxStart = idx;
+  var idxEnd = ee.Number(idxStart).add(serieSize);
+  // var subList = list1.slice(idxStart,idxEnd);
+  // var imgSliced = ee.Image(subList)
+  var imgSliced = imgCropBands.slice(idxStart,idxEnd).float().rename(imgBand);
+  // return subList;
+  return imgSliced;
+});
+// var imgTemplate = [1,10,100,1000,10000,100000,1000000];
+var imgTemplate = [1000000,100000,10000,1000,100,10,1];
+var imgTemplate = ee.Image(imgTemplate).float().toArray().toArray(1);
+// Map.addLayer(imgTemplate,null,'imgTemplate');
+var imgDetection = imgSlicedCol.matrixMultiply(imgTemplate);
+// Map.addLayer(imgDetection,null,'imgDetection');
+var flattenImgBand = []; //imgList.size().getInfo()
+for(var i=0;i<27;i++){
+  flattenImgBand.push('imgTest_'+i);
+}
+print("flattenImgBand",flattenImgBand);
+var imgPrecessed = imgDetection.arrayProject([0]).arrayFlatten([flattenImgBand]);
+// Map.addLayer(imgPrecessed,null,'imgPrecessed');
+// var imgAbandon = imgPrecessed.eq(1100000).or(imgPrecessed.eq(1000000));
+// Map.addLayer(imgAbandon,null,'imgAbandon');
+// var imgReclaim = imgPrecessed.eq(1).or(imgPrecessed.eq(11));
+// Map.addLayer(imgReclaim,null,'imgReclaim');
+var imgPrecessedCol = imgPrecessed.bandNames().map(function(band){
+  return imgPrecessed.select(ee.String(band)).rename('imgCrop');
+});
+var imgPrecessedCol2 = ee.ImageCollection(imgPrecessedCol);
+// print('imgPrecessedCol',imgPrecessedCol);
+Map.addLayer(imgPrecessedCol2,null,'imgPrecessedCol2');
+var imgAbandon = ee.List.sequence(0,imgPrecessedCol.size().subtract(1)).map(function(idx){
+  var imgCrop = ee.Image(imgPrecessedCol.get(idx));
+  var imgFlag = imgCrop.eq(1100000).rename('abandonFlag');
+  var imgAbandonYear = imgFlag.updateMask(imgFlag.gt(0))
+                              .multiply(ee.Number(idx).add(1992)).rename('abandonYear');
+  return ee.Image.cat([imgFlag,imgAbandonYear]).float();
+});
+imgAbandon = ee.ImageCollection(imgAbandon);
+var abandonEarly = imgAbandon.select('abandonYear').min();
+Map.addLayer(abandonEarly.randomVisualizer(),null,'abandonEarly');
+var imgCount = imgAbandon.select('abandonFlag').sum();
+Map.addLayer(imgCount.randomVisualizer(),null,'imgCount');
