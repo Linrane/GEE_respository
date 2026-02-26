@@ -1,0 +1,230 @@
+import os
+import ee
+import geemap
+import time
+from datetime import datetime
+import logging
+import sys
+
+"""
+使用方法:
+python download.py
+
+功能:
+- 支持不同的输出格式
+"""
+
+# ===== 配置参数 =====
+# ImageCollection ID (实际上是一个多波段图像)
+COLLECTION_ID = 'users/xxxxxx/test/LandTrendr_Fitted_NBR2_1990_2025_Blue'
+# 输出根目录
+OUTPUT_ROOT = 'C:/Users/xxxx/Desktop/xxxxx'
+# 研究区域 - 请根据你的需要修改
+# 可以是shapefile路径、资产ID或者坐标范围
+STUDY_AREA = None  # 如果为None，则下载整个图像的范围
+# 目标坐标系
+TARGET_CRS = 'EPSG:4326'
+# 下载分辨率（米）
+SCALE = 30
+# 输出文件名
+OUTPUT_FILENAME = 'xxxxxx.tif'
+
+def initialize_ee():
+    """初始化Earth Engine"""
+    try:
+        # 如果已经认证过，直接初始化
+        ee.Initialize()
+        print("Earth Engine 初始化成功")
+    except Exception:
+        print("需要重新认证Earth Engine...")
+        ee.Authenticate()
+        # 初始化Earth Engine 这里写你的项目ID
+        ee.Initialize(project='ee-xxxxx')
+        print("Earth Engine 认证并初始化成功")
+
+def get_study_area():
+    """获取研究区域"""
+    if STUDY_AREA is None:
+        return None
+    elif isinstance(STUDY_AREA, str):
+        # 如果是字符串，假设是资产ID
+        return ee.FeatureCollection(STUDY_AREA).geometry()
+    else:
+        # 直接返回几何对象
+        return STUDY_AREA
+
+def download_data():
+    """下载数据"""
+    print("数据下载脚本")
+    print("="*60)
+    
+    # 初始化Earth Engine
+    initialize_ee()
+    
+    # 创建输出目录
+    os.makedirs(OUTPUT_ROOT, exist_ok=True)
+    print(f"输出目录: {OUTPUT_ROOT}")
+    
+    try:
+        # 加载图像数据
+        print(f"\n加载图像: {COLLECTION_ID}")
+        
+        # 首先尝试作为ImageCollection加载
+        try:
+            collection = ee.ImageCollection(COLLECTION_ID)
+            collection_size = collection.size().getInfo()
+            
+            if collection_size == 1:
+                # 如果ImageCollection只有一个图像，获取它
+                image = collection.first()
+                print(f"检测到ImageCollection包含1个图像，将其作为单一图像处理")
+            elif collection_size > 1:
+                # 如果有多个图像，使用mosaic或median合成
+                image = collection.mosaic()  # 或者使用 .median()
+                print(f"检测到ImageCollection包含{collection_size}个图像，使用mosaic合成")
+            else:
+                print("ImageCollection为空")
+                return False
+                
+        except Exception:
+            # 如果作为ImageCollection失败，尝试作为单一图像加载
+            print("尝试作为单一图像加载...")
+            image = ee.Image(COLLECTION_ID)
+        
+        # 获取图像信息
+        try:
+            bands = image.bandNames().getInfo()
+            print(f"波段信息: {bands}")
+            print(f"波段数量: {len(bands)}")
+            
+            # 获取图像的时间和几何信息
+            try:
+                img_date = ee.Date(image.get('system:time_start')).format('YYYY-MM-dd').getInfo()
+                print(f"图像日期: {img_date}")
+            except:
+                print("无法获取图像日期信息")
+            
+            # 获取图像边界
+            geometry = image.geometry()
+            bounds = geometry.bounds().getInfo()
+            print(f"图像边界: {bounds}")
+            
+        except Exception as e:
+            print(f"获取图像信息失败: {str(e)}")
+        
+        # 获取研究区域
+        study_area = get_study_area()
+        
+        # 如果指定了研究区域，裁剪图像
+        if study_area:
+            print(f"裁剪到指定研究区域...")
+            image = image.clip(study_area)
+            download_geometry = study_area
+        else:
+            print(f"下载整个图像区域...")
+            download_geometry = image.geometry()
+        
+        # 构建输出文件路径
+        output_path = os.path.join(OUTPUT_ROOT, OUTPUT_FILENAME)
+        
+        # 检查文件是否已存在
+        if os.path.exists(output_path):
+            print(f"文件已存在: {output_path}")
+            overwrite = input("是否覆盖？(y/n): ").lower().strip()
+            if overwrite != 'y':
+                print("取消下载")
+                return True
+        
+        print(f"\n开始下载...")
+        print(f"输出文件: {output_path}")
+        print(f"分辨率: {SCALE}m")
+        print(f"坐标系: {TARGET_CRS}")
+        
+        start_time = time.time()
+        
+        # 下载图像
+        geemap.download_ee_image(
+            image=image,
+            filename=output_path,
+            scale=SCALE,
+            crs=TARGET_CRS,
+            region=download_geometry
+        )
+        
+        elapsed_time = time.time() - start_time
+        
+        print(f"\n✓ 下载成功!")
+        print(f"文件保存至: {output_path}")
+        print(f"下载耗时: {elapsed_time/60:.1f} 分钟")
+        
+        # 检查文件大小
+        if os.path.exists(output_path):
+            file_size = os.path.getsize(output_path) / (1024 * 1024)  # MB
+            print(f"文件大小: {file_size:.1f} MB")
+        
+        return True
+        
+    except Exception as e:
+        print(f"\n✗ 下载失败: {str(e)}")
+        return False
+
+def inspect_data():
+    """检查数据结构"""
+    print("检查数据结构...")
+    print("="*40)
+    
+    # 初始化Earth Engine
+    initialize_ee()
+    
+    try:
+        # 尝试作为ImageCollection加载
+        try:
+            collection = ee.ImageCollection(COLLECTION_ID)
+            collection_size = collection.size().getInfo()
+            print(f"作为ImageCollection: {collection_size} 个图像")
+            
+            if collection_size > 0:
+                first_image = collection.first()
+                bands = first_image.bandNames().getInfo()
+                print(f"第一个图像的波段: {bands}")
+                
+        except Exception as e:
+            print(f"作为ImageCollection失败: {str(e)}")
+        
+        # 尝试作为单一图像加载
+        try:
+            image = ee.Image(COLLECTION_ID)
+            bands = image.bandNames().getInfo()
+            print(f"作为单一图像: {len(bands)} 个波段")
+            print(f"波段列表: {bands}")
+            
+        except Exception as e:
+            print(f"作为单一图像失败: {str(e)}")
+            
+    except Exception as e:
+        print(f"检查失败: {str(e)}")
+
+def main():
+    """主函数"""
+    # 检查命令行参数
+    if len(sys.argv) > 1:
+        if sys.argv[1].lower() == 'inspect':
+            inspect_data()
+            return
+        elif sys.argv[1].lower() == 'help':
+            print("使用方法:")
+            print("  python script.py          # 下载数据")
+            print("  python script.py inspect  # 检查数据结构")
+            print("  python script.py help     # 显示帮助")
+            return
+    
+    # 执行下载
+    success = download_data()
+    
+    if success:
+        print("\n任务完成!")
+    else:
+        print("\n任务失败，请检查错误信息")
+
+if __name__ == "__main__":
+    main()
