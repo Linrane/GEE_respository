@@ -1,0 +1,172 @@
+var roi = AOI;
+Map.addLayer(roi, {'color':'grey'}, 'StudyArea');
+Map.centerObject(roi,5);
+var dataset = ee.ImageCollection('USDA/NASS/CDL')
+                  .filter(ee.Filter.date('2018-01-01', '2019-12-31'))
+                  .first();
+var cropLandcover = dataset.select('cropland');
+// Map.setCenter(-100.55, 40.71, 4);
+Map.addLayer(cropLandcover, {}, 'Crop Landcover1');
+// compute the coordinates
+var bounds = roi.bounds();
+var coords = ee.List(bounds.coordinates().get(0));
+var xmin = ee.List(coords.get(0)).get(0);
+var ymin = ee.List(coords.get(0)).get(1);
+var xmax = ee.List(coords.get(2)).get(0);
+var ymax = ee.List(coords.get(2)).get(1);
+// set the gaps for longitude and latitudes 
+// you can choose to set the absolute lavues like dx=dy=0.02;
+// or you can choose to set the study area by evenly splitting the area in the following ways
+var dx = (ee.Number(xmax).subtract(xmin)).divide(15); //4
+var dy = (ee.Number(ymax).subtract(ymin)).divide(15);
+var grid = generateGrid(xmin, ymin, xmax, ymax, dx, dy);    //设置参数，生成格网
+var grid = grid.filterBounds(roi); // filter out out-of-boundary tiles
+print(grid.size()); //查看生成所有格网数量
+Map.addLayer(grid, {color:'orange'}, 'grid');
+// print(grid.first());
+var gridList = grid.toList(grid.size());
+var roi1 = ee.Feature(gridList.get(115));
+Map.addLayer(roi1, {color:'red'}, 'roi1');
+var CDL_corn_2018 = ee.ImageCollection('USDA/NASS/CDL')
+                      .filter(ee.Filter.date('2018-01-01', '2018-12-31'))
+                      .first()
+                      .select("cropland")
+                      .clip(roi)
+                      .eq(1);
+var CDL_corn_2019 = ee.ImageCollection('USDA/NASS/CDL')
+                      .filter(ee.Filter.date('2019-01-01', '2019-12-31'))
+                      .first()
+                      .select("cropland")
+                      .clip(roi)
+                      .eq(1);
+var CDL_corn_2020 = ee.ImageCollection('USDA/NASS/CDL')
+                      .filter(ee.Filter.date('2020-01-01', '2020-12-31'))
+                      .first()
+                      .select("cropland")
+                      .clip(roi)
+                      .eq(1);
+var CDL_corn_cumlative = CDL_corn_2018.add(CDL_corn_2019).add(CDL_corn_2020);
+Map.addLayer(CDL_corn_cumlative.randomVisualizer(), {}, 'CDL_corn_cumlative',false);
+var cornSample1 = SampleFunPoint(CDL_corn_cumlative.eq(3),roi1,500);
+cornSample1 = cornSample1.map(function(fea){
+  return fea.set('landcover',1);
+});
+var NoncornSample1 = SampleFunPoint(CDL_corn_cumlative.eq(0),roi1,500);
+NoncornSample1 = NoncornSample1.map(function(fea){
+  return fea.set('landcover',0);
+});
+Map.addLayer(cornSample1, {'color':'blue'}, 'cornSample1');
+Map.addLayer(NoncornSample1,{'color':'green'}, 'NoncornSample1');
+// var s_bands = ["B2","B3","B4","B5","B6","B7","B8","B11","S2PMI","S2NDVI","S2PMI2NDVI","S2LSWI","S2LSWI2NDVI"];
+var year = '2017';
+var S2_bands = ["B2","B3","B4","B8","B11",'B12'];
+// filter the images for rice extraction 
+var S2SRCol = ee.ImageCollection('COPERNICUS/S2_HARMONIZED')//S2_SR
+                //.filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE',80))
+                .filterDate(year+'-04-01', year+'-12-31')
+                .filterBounds(roi)
+                // .map(rmS2cloud)
+                .map(function(img){
+                  var ndvi = img.normalizedDifference(['B8','B4']).rename("NDVI");
+                  return img.addBands(ndvi).clip(roi)});
+var monthcomposite = ee.List.sequence(0, 1*8).map(function(n) {
+  var start = ee.Date(year+'-03-01').advance(n, 'month');
+  var end = start.advance(1, 'month');
+  return S2SRCol.filterDate(start, end).select("NDVI").median().clip(roi);
+}).flatten();
+print(monthcomposite);
+var imageCol = ee.ImageCollection.fromImages(monthcomposite);
+var imgData = imageCol.toBands();
+// Map.addLayer(imgData,null,"imgData");
+var imgBand = imgData.bandNames();
+print("imgBand",imgBand);
+var NoncornSample2 = imgData.sampleRegions({
+  collection: NoncornSample1,
+  properties: ['landcover'],
+  scale: 30,
+  tileScale:16,
+  geometries: true});
+print("NoncornSample2",NoncornSample2);
+var cornSample2 = imgData.sampleRegions({
+  collection: cornSample1,
+  properties: ['landcover'],
+  scale: 30,
+  tileScale:16,
+  geometries: true});
+print("cornSample2",cornSample2);
+var cornMean = cornSample2.reduceColumns({
+  reducer:ee.Reducer.mean().repeat(8),
+  selectors:imgBand});
+cornMean = ee.List(ee.Dictionary(cornMean).get('mean'));
+print("cornMean",cornMean);
+var cornStdDev = cornSample2.reduceColumns({
+  reducer:ee.Reducer.stdDev().repeat(8),
+  selectors:imgBand});
+cornStdDev = ee.List(ee.Dictionary(cornStdDev).get('stdDev'));
+print("cornStdDev",cornStdDev);
+var cornMeanStdDevPlus = ee.List([0,1,2,3,4,5,6,7]).map(function(item){
+  var MeanStdDevPlus = ee.Number(cornMean.get(item)).add(cornStdDev.get(item));
+  return MeanStdDevPlus;
+});
+print("cornMeanStdDevPlus",cornMeanStdDevPlus);
+var cornMeanStdDevMinus = ee.List([0,1,2,3,4,5,6,7]).map(function(item){
+  var MeanStdDevPlus = ee.Number(cornMean.get(item)).subtract(cornStdDev.get(item));
+  return MeanStdDevPlus;
+});
+print("cornMeanStdDevMinus",cornMeanStdDevMinus);
+var cornSample2 = cornSample2.map(function(fea){
+  var feaValue = ee.List(ee.Feature(fea).toDictionary(imgBand).values());
+  var flag = ee.List([0,1,2,3,4,5,6,7]).map(function(item){
+    var a_b = ee.Number(cornMeanStdDevMinus.get(item)).subtract(feaValue.get(item));
+    var c_b = ee.Number(cornMeanStdDevPlus.get(item)).subtract(feaValue.get(item));
+    return ee.Number(a_b).multiply(c_b);
+  });
+  return fea.set('flag0',flag.get(0)).set('flag1',flag.get(1)).set('flag2',flag.get(2))
+            .set('flag3',flag.get(3)).set('flag4',flag.get(4)).set('flag5',flag.get(5))
+            .set('flag6',flag.get(6)).set('flag7',flag.get(7));
+});
+print("cornSample2",cornSample2);
+var cornSample3 = cornSample2.filter(ee.Filter.lt("flag0",0))
+                             .filter(ee.Filter.lt("flag1",0))
+                             .filter(ee.Filter.lt("flag2",0))
+                             .filter(ee.Filter.lt("flag3",0))
+                             .filter(ee.Filter.lt("flag4",0))
+                             .filter(ee.Filter.lt("flag5",0))
+                             .filter(ee.Filter.lt("flag6",0))
+                             .filter(ee.Filter.lt("flag7",0));
+print("cornSample3",cornSample3);                             
+Map.addLayer(cornSample3,{'color':'yellow'},"cornSample3");
+function SampleFunPoint(img,roi,pointNum){
+  var imgNeibor = ee.Image(img).set("system:footprint",roi.geometry());
+  var pointSample =  imgNeibor.selfMask().stratifiedSample({
+    numPoints:pointNum,
+    // classBand:imgNeibor.bandNames(),
+    region:roi.geometry(),
+    scale:100,
+    seed:0,
+    // tileScale:8,
+    geometries:true
+  });
+  return pointSample;
+}
+/**************************************************************************
+generate the grid
+***************************************************************************/
+function generateGrid(xmin, ymin, xmax, ymax, dx, dy) {
+  // var dx = (ee.Number(xmax).subtract(xmin)).divide(2); //4
+  // var dy = (ee.Number(ymax).subtract(ymin)).divide(2);
+  var xx = ee.List.sequence(xmin, ee.Number(xmax).subtract(0.0001), dx);
+  var yy = ee.List.sequence(ymin, ee.Number(ymax).subtract(0.0001), dy);
+  var cells = xx.map(function(x) {
+    return yy.map(function(y) {
+      var x1 = ee.Number(x);
+      var x2 = ee.Number(x).add(ee.Number(dx));
+      var y1 = ee.Number(y);
+      var y2 = ee.Number(y).add(ee.Number(dy));
+      var coords = ee.List([x1, y1, x2, y2]);
+      var rect = ee.Algorithms.GeometryConstructors.Rectangle(coords);  //生成矩形
+      return ee.Feature(rect);
+    });
+  }).flatten();  //变成单个数组
+  return ee.FeatureCollection(cells);
+}
