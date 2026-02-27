@@ -1,0 +1,55 @@
+// 示例用法  
+// 定义一个多边形矢量  
+var polygon = AOI3;
+// 调用函数进行分块  
+var numHorizontal = 4; // 横向分块数  
+var numVertical = 3;   // 纵向分块数  
+var rectangles = shpRectBlock(polygon, numHorizontal, numVertical); 
+// 在地图上显示结果  
+Map.centerObject(polygon, 4); 
+Map.addLayer(polygon, {color: 'blue'}, 'Original Polygon'); 
+Map.addLayer(rectangles, {color: 'red'}, 'Rectangles');
+
+// 定义一个函数，用于对矢量进行矩形分块  
+function shpRectBlock(vector, numHorizontal, numVertical) {  
+  // 检查输入是否为矢量  
+  if (!(vector instanceof ee.Geometry || vector instanceof ee.Feature || vector instanceof ee.FeatureCollection)) {  
+    throw new Error('Input must be a Geometry, Feature, or FeatureCollection.');  
+  }  
+  // 如果是 FeatureCollection，提取其几何信息  
+  if (vector instanceof ee.FeatureCollection) {  
+    vector = vector.geometry();  
+  }  
+  else if (vector instanceof ee.Feature) {  
+    vector = vector.geometry();  
+  }  
+  else {  
+    vector = vector;  
+  }  
+  // 获取矢量的边界框  
+  var bounds = vector.bounds();  
+  var coords = ee.List(bounds.coordinates().get(0)); // 获取边界框的坐标  
+  var xmin = ee.Number(ee.List(coords.get(0)).get(0));  
+  var ymin = ee.Number(ee.List(coords.get(0)).get(1));  
+  var xmax = ee.Number(ee.List(coords.get(2)).get(0));  
+  var ymax = ee.Number(ee.List(coords.get(2)).get(1));  
+  // 计算每个矩形块的宽度和高度  
+  var xStep = xmax.subtract(xmin).divide(numHorizontal);  
+  var yStep = ymax.subtract(ymin).divide(numVertical);  
+  // 创建矩形块  
+  var rectangles = ee.List.sequence(0, numHorizontal - 1).map(function(i) {  
+    return ee.List.sequence(0, numVertical - 1).map(function(j) {  
+      var x0 = xmin.add(xStep.multiply(i));  
+      var x1 = x0.add(xStep);  
+      var y0 = ymin.add(yStep.multiply(j));  
+      var y1 = y0.add(yStep);  
+      var tmpGeo = ee.Geometry.Rectangle([x0, y0, x1, y1]);  
+      var GeoCommon = tmpGeo//.intersection(vector,1);  
+      // return ee.Feature(ee.Geometry.Rectangle([x0, y0, x1, y1]));  
+      return ee.Feature(GeoCommon);  
+    });  
+  }).flatten();  
+  // 将矩形块转换为 FeatureCollection  
+  var rectanglesFC = ee.FeatureCollection(rectangles).filterBounds(vector);  
+  return rectanglesFC;  
+}
