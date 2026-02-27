@@ -10,7 +10,7 @@
 
 如果有好的想法和建议，以及批评，修改错误等都可以提出，方便大家共同学习，可以通过邮箱联系我成为共创，一起分享实用的代码。
 
-注：本文所使用的assets和project都是出自于本地上传，所以你需要在如：“var roi = ee.FeatureCollection('projects/ee-linrane111/assets/eeds');”中进行修改，把引号内容的内容修改成你上传的内容即可。
+注：本文所使用的assets和project都是出自于本地上传，所以你需要在如：“var roi = ee.FeatureCollection('projects/ee-linrane111/assets/eeds');”中进行修改，把引号内容的内容修改成你上传的内容即可。如有出现代码地址无法运行（被删除）请及时通过主页联系我的邮箱来进行补充。
 
 # 1.监督分类下的土地利用覆盖
 
